@@ -56,7 +56,7 @@ pub struct Transaction<C, I> {
 	locks: LockState<C, I>,
 }
 
-pub trait Lock<S: Topic, K: Kind> {
+pub trait Lock<T: Topic, K: Kind> {
 	type Output;
 
 	fn locka(self) -> Self::Output;
@@ -89,11 +89,11 @@ impl<K: Kind, C, I> Lock<Index, K> for Transaction<C, I> {
 }
 
 impl<C, I> Transaction<C, I> {
-	pub fn lock<S: Topic, K: Kind>(self) -> <Self as Lock<S, K>>::Output
+	pub fn lock<T: Topic, K: Kind>(self) -> <Self as Lock<T, K>>::Output
 	where
-		Self: Lock<S, K>,
+		Self: Lock<T, K>,
 	{
-		Lock::<S, K>::locka(self)
+		Lock::<T, K>::locka(self)
 	}
 }
 
