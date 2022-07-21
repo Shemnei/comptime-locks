@@ -2,16 +2,16 @@ use std::marker::PhantomData;
 
 use capability::*;
 use kind::*;
-use scope::*;
+use topic::*;
 
-mod scope {
-	pub trait Scope {}
+mod topic {
+	pub trait Topic {}
 
 	pub struct Chunks;
-	impl Scope for Chunks {}
+	impl Topic for Chunks {}
 
 	pub struct Index;
-	impl Scope for Index {}
+	impl Topic for Index {}
 }
 
 mod kind {
@@ -56,7 +56,7 @@ pub struct Transaction<C, I> {
 	locks: LockState<C, I>,
 }
 
-pub trait Lock<S: Scope, K: Kind> {
+pub trait Lock<S: Topic, K: Kind> {
 	type Output;
 
 	fn locka(self) -> Self::Output;
@@ -89,7 +89,7 @@ impl<K: Kind, C, I> Lock<Index, K> for Transaction<C, I> {
 }
 
 impl<C, I> Transaction<C, I> {
-	pub fn lock<S: Scope, K: Kind>(self) -> <Self as Lock<S, K>>::Output
+	pub fn lock<S: Topic, K: Kind>(self) -> <Self as Lock<S, K>>::Output
 	where
 		Self: Lock<S, K>,
 	{
@@ -125,6 +125,9 @@ mod tests {
 				index: PhantomData::<Shared>::default(),
 			},
 		};
+
+		// Does not work as the chunks topic is not locked as exlusive
+		// delete_chunk(txn);
 
 		let txn = txn.lock::<Chunks, Exclusive>();
 
