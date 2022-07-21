@@ -5,27 +5,32 @@ use kind::*;
 use topic::*;
 
 mod topic {
-	pub trait Topic {}
+	pub trait Topic: std::fmt::Debug {}
 
+	#[derive(Debug)]
 	pub struct Chunks;
 	impl Topic for Chunks {}
 
+	#[derive(Debug)]
 	pub struct Index;
 	impl Topic for Index {}
 }
 
 mod kind {
-	pub trait Kind {}
+	pub trait Kind: std::fmt::Debug {}
 
+	#[derive(Debug)]
 	pub struct None;
 	impl Kind for None {}
 
-	pub trait AnyKind {}
+	pub trait AnyKind: std::fmt::Debug {}
 
+	#[derive(Debug)]
 	pub struct Shared;
 	impl Kind for Shared {}
 	impl AnyKind for Shared {}
 
+	#[derive(Debug)]
 	pub struct Exclusive;
 	impl Kind for Exclusive {}
 	impl AnyKind for Exclusive {}
@@ -56,44 +61,56 @@ pub struct Transaction<C, I> {
 	locks: LockState<C, I>,
 }
 
-pub trait Lock<T: Topic, K: Kind> {
+pub trait Lock<T: Topic, K: Kind>: Sized {
 	type Output;
+	type Error;
 
-	fn locka(self) -> Self::Output;
+	fn aquire_lock(self) -> Result<Self::Output, (Self, Self::Error)>;
 }
 
 impl<K: Kind, C, I> Lock<Chunks, K> for Transaction<C, I> {
+	type Error = String;
 	type Output = Transaction<K, I>;
 
-	fn locka(self) -> Self::Output {
-		Transaction {
+	fn aquire_lock(self) -> Result<Self::Output, (Self, Self::Error)> {
+		Ok(Transaction {
 			locks: LockState {
 				chunks: Default::default(),
 				index: self.locks.index,
 			},
-		}
+		})
 	}
 }
 
-impl<K: Kind, C, I> Lock<Index, K> for Transaction<C, I> {
+impl<K: Kind + 'static, C, I: 'static> Lock<Index, K> for Transaction<C, I> {
+	type Error = String;
 	type Output = Transaction<C, K>;
 
-	fn locka(self) -> Self::Output {
-		Transaction {
-			locks: LockState {
-				index: Default::default(),
-				chunks: self.locks.chunks,
-			},
+	fn aquire_lock(self) -> Result<Self::Output, (Self, Self::Error)> {
+		if std::any::TypeId::of::<I>() == std::any::TypeId::of::<K>() {
+			Err((self, String::from("Lock already aquired for index")))
+		} else {
+			Ok(Transaction {
+				locks: LockState {
+					index: Default::default(),
+					chunks: self.locks.chunks,
+				},
+			})
 		}
 	}
 }
 
 impl<C, I> Transaction<C, I> {
-	pub fn lock<T: Topic, K: Kind>(self) -> <Self as Lock<T, K>>::Output
+	pub fn lock<T: Topic, K: Kind>(
+		self,
+	) -> Result<
+		<Self as Lock<T, K>>::Output,
+		(Self, <Self as Lock<T, K>>::Error),
+	>
 	where
 		Self: Lock<T, K>,
 	{
-		Lock::<T, K>::locka(self)
+		Lock::<T, K>::aquire_lock(self)
 	}
 }
 
@@ -114,7 +131,7 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn full_example() {
+	fn full_example_ok() {
 		fn delete_chunk<T: DeleteChunk>(txn: T) {
 			txn.delete();
 		}
@@ -129,8 +146,30 @@ mod tests {
 		// Does not work as the chunks topic is not locked as exlusive
 		// delete_chunk(txn);
 
-		let txn = txn.lock::<Chunks, Exclusive>();
+		if let Ok(txn) = txn.lock::<Chunks, Exclusive>() {
+			delete_chunk(txn);
+		} else {
+			panic!("Failed to aquire lock on index");
+		}
+	}
 
-		delete_chunk(txn);
+	#[test]
+	fn kind_checking() {
+		let txn = Transaction {
+			locks: LockState {
+				chunks: PhantomData::<Shared>::default(),
+				index: PhantomData::<Shared>::default(),
+			},
+		};
+
+		assert!(txn.lock::<Index, Shared>().is_err());
+
+		let txn = Transaction {
+			locks: LockState {
+				chunks: PhantomData::<Shared>::default(),
+				index: PhantomData::<Shared>::default(),
+			},
+		};
+		assert!(txn.lock::<Index, Exclusive>().is_ok());
 	}
 }
