@@ -56,6 +56,13 @@ pub struct LockState<C, I> {
 	index: PhantomData<I>,
 }
 
+impl<C, I> LockState<C, I> {
+	// Private copy
+	fn _copy(&self) -> Self {
+		LockState { chunks: self.chunks, index: self.index }
+	}
+}
+
 #[derive(Default)]
 pub struct Transaction<C, I> {
 	locks: LockState<C, I>,
@@ -112,6 +119,21 @@ impl<C, I> Transaction<C, I> {
 	{
 		Lock::<T, K>::aquire_lock(self)
 	}
+
+	// This implementation is janky and should probably not be used in a "real"
+	// codebase
+	pub fn with_lock<T: Topic, K: Kind>(
+		&mut self,
+		f: impl Fn(&mut <Self as Lock<T, K>>::Output),
+	) -> Result<(), (Self, <Self as Lock<T, K>>::Error)>
+	where
+		Self: Lock<T, K>,
+	{
+		let locks = self.locks._copy();
+		let mut this = Lock::<T, K>::aquire_lock(Transaction { locks })?;
+		f(&mut this);
+		Ok(())
+	}
 }
 
 impl<C: AnyKind, I> ReadChunk for Transaction<C, I> {
@@ -158,6 +180,51 @@ mod tests {
 		} else {
 			panic!("Failed to aquire lock on index");
 		}
+	}
+
+	#[test]
+	fn with_lock() {
+		trait DeleteIndex {
+			fn delete_index(&self);
+		}
+
+		impl<C> DeleteIndex for Transaction<C, Exclusive> {
+			fn delete_index(&self) {}
+		}
+
+		fn delete_chunk<T: DeleteChunk>(txn: &T) {
+			txn.delete();
+		}
+
+		fn delete_index<T: DeleteIndex>(txn: &T) {
+			txn.delete_index();
+		}
+
+		let mut txn = Transaction {
+			locks: LockState {
+				chunks: PhantomData::<Shared>::default(),
+				index: PhantomData::<Shared>::default(),
+			},
+		};
+
+		let res = txn.with_lock::<Chunks, Exclusive>(|txn| {
+			let res = txn.with_lock::<Index, Exclusive>(|txn| {
+				delete_chunk(txn);
+				delete_index(txn);
+			});
+
+			// Does not work outside of fn context
+			//delete_index(txn);
+
+			assert!(res.is_ok());
+
+			delete_chunk(txn);
+		});
+
+		// Does not work outside of fn context
+		//delete_chunk(txn);
+
+		assert!(res.is_ok());
 	}
 
 	#[test]
