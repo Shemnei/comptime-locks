@@ -132,7 +132,12 @@ mod tests {
 
 	#[test]
 	fn full_example_ok() {
-		fn delete_chunk<T: DeleteChunk>(txn: T) {
+		fn rw_chunk<T: ReadChunk + WriteChunk>(txn: &T) {
+			txn.read();
+			txn.write();
+		}
+
+		fn delete_chunk<T: DeleteChunk>(txn: &T) {
 			txn.delete();
 		}
 
@@ -143,11 +148,13 @@ mod tests {
 			},
 		};
 
+		rw_chunk(&txn);
+
 		// Does not work as the chunks topic is not locked as exlusive
 		// delete_chunk(txn);
 
 		if let Ok(txn) = txn.lock::<Chunks, Exclusive>() {
-			delete_chunk(txn);
+			delete_chunk(&txn);
 		} else {
 			panic!("Failed to aquire lock on index");
 		}
@@ -170,6 +177,7 @@ mod tests {
 				index: PhantomData::<Shared>::default(),
 			},
 		};
+
 		assert!(txn.lock::<Index, Exclusive>().is_ok());
 	}
 }
